@@ -8,8 +8,7 @@ class parser_v1 {
 
     @param buffer [in] raw http buffer to read from
     @param fields [in/out] container to add the headers, trailers and verb/status
-    @param body [out] buffer to store any parsed body data
-     @param ec [out] error::need_more if more input is needed to complete the message
+    @param ec [out] error::need_more if more input is needed to complete the message
                     error::have_more if there is more body bytes in the same buffer. The method should be called again to retrieve the next body bytes.
                     parse error 
 
@@ -17,7 +16,7 @@ class parser_v1 {
    */
    template <Fields>
    pair<size_t, asio::const_buffer>
-   write(const asio::mutable_buffer& buffer, Fields& fields, asio::mutable_buffer& body, error_code& ec);
+   write(const asio::mutable_buffer& buffer, Fields& fields, error_code& ec);
 
 
    /*
