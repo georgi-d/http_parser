@@ -9,15 +9,14 @@ class parser_v1 {
     @param buffer [in] raw http buffer to read from
     @param fields [in/out] container to add the headers, trailers and verb/status
     @param body [out] buffer to store any parsed body data
-    @param ec [out] error::need_more if more input is needed to complete the message
-                    error::need_more && result.first = 0 if more input is needed while preserving the existing one to complete the message
-                    error::have_more if the body buffer is full and there is more data in the input
+     @param ec [out] error::need_more if more input is needed to complete the message
+                    error::have_more if there is more body bytes in the same buffer. The method should be called again to retrieve the next body bytes.
                     parse error 
 
-    @return pair containing bytes_consumed and body_bytes
+    @return pair containing bytes_consumed and body_bytes const_buffer within the buffer
    */
    template <Fields>
-   pair<size_t, size_t>
+   pair<size_t, asio::const_buffer>
    write(const asio::mutable_buffer& buffer, Fields& fields, asio::mutable_buffer& body, error_code& ec);
 
 
@@ -29,11 +28,11 @@ class parser_v1 {
     @param body [out] buffer to store any parsed body data
     @param ec [out] error code if error is encountered or error::need_more && result.first = 0 if the end of the headers have not been reached
 
-    @return pair containing bytes_consumed and body_bytes
+    @return bytes_consumed
    */
-   template <class ConstBufferSequence, class Fields>
-   pair<size_t, size_t> 
-   write(const asio::mutable_buffer& buffer, Fields& fields, error_code& ec);
+   template <class Fields>
+   size_t
+   write_headers(const asio::mutable_buffer& buffer, Fields& fields, error_code& ec);
 
    /*
    Returns whether the complete message has been parsed
@@ -46,13 +45,13 @@ class parser_v1 {
 /*
 Read and parse the HTTP headers
 */
-template<class SyncStream, class Parser, class ReadDynamicBufferSequence, class Fields>
+template<class SyncStream, class Parser, class ContinuousDynamicBuffer, class Fields>
 void
 read_headers(SyncStream& stream, Parser& parser, ContinuousDynamicBuffer& read_buf, Fields& fields, error_code& ec)
 {
-   for (auto bp = parser.write(read_buf.data(), fields, ec), read_buf.consume(bp.first);
+   for (auto bc = parser.write_headers(read_buf.data(), fields, ec), read_buf.consume(bc);
         !parser.complete() && ec == error::need_more();
-        bt = parser.write(read_buf.data(), fields, ec), read_buf.consume(bp.first))
+        bt = parser.write_headers(read_buf.data(), fields, ec), read_buf.consume(bc))
    {
       auto const rs = read_size(read_buf);
       ec = {};
@@ -70,9 +69,9 @@ read_headers(SyncStream& stream, Parser& parser, ContinuousDynamicBuffer& read_b
 Read a full HTTP message filling the body into a stream_buf
 TODO: Add support for CompletionCondition
 */
-template<class SyncStream, class Parser, class ReadConsecutiveDynamicBuffer, class Fields, class BodyConsecutinveDynamicBuffer>
+template<class SyncStream, class Parser, class ContinuousDynamicBuffer, class Fields, class DynamicBufferSequence>
 void
-read(SyncStream& stream, Parser& parser, ReadConsecutiveDynamicBuffer& read_buf, BodyConsecutinveDynamicBuffer& body, error_code& ec)
+read(SyncStream& stream, Parser& parser, ContinuousDynamicBuffer& read_buf, DynamicBufferSequence& body, error_code& ec)
 {
    read_headers(stream, parser, read_buf, fields, ec);
 
@@ -86,11 +85,9 @@ read(SyncStream& stream, Parser& parser, ReadConsecutiveDynamicBuffer& read_buf,
       write_continue(stream);
    }
 
-   const auto ws = prepare_size(body);
-
-   for (auto bp = parser.write(read_buf.data(), fields, body.prepare(ws) ec), read_buf.consume(bp.first), body.commit(bp.second);
+   for (auto bp = parser.write(read_buf.data(), fields, ec), read_buf.consume(bp.first), body.commit(asio::buffer_copy(body.prepare(asio::buffer_size(bp.second)), bp.second));
         !parser.complete() && (ec == error::need_more() || ec == error::have_more());
-        bt = parser.write(read_buf.data(), fields, ec), readbuf.consume(bp.first), body.commit(bp.second))
+        bt = parser.write(read_buf.data(), fields, ec), readbuf.consume(bp.first), body.commit(asio::buffer_copy(body.prepare(asio::buffer_size(bp.second)), bp.second))
    {
       if (ec == error::need_more())
       {
